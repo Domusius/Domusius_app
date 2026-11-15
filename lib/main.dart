@@ -135,7 +135,7 @@ class ConnectionScreen extends StatefulWidget {
 
 class _ConnectionScreenState extends State<ConnectionScreen> {
   final _urlController =
-      TextEditingController(text: 'http://100.67.19.24/Domusius-Github/api');
+      TextEditingController(text: 'http://100.67.19.24/Solar/api');
   bool _isLoading = false;
   String _statusMessage = '';
 
@@ -382,7 +382,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-// 3. Hoveddashboard med tandhjul og indstillings-popup
 class MainDashboardScreen extends StatefulWidget {
   final String baseUrl;
   final String username;
@@ -406,8 +405,8 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
   bool _isLoading = true;
   String _error = '';
 
-  String _siteTitle = 'Solarius - Ærøvej -1';
-  String? _aktivtModulNavn;
+  String _siteTitle = 'Solarius';
+  String? _aktivtModulNoegle;
   String _standardModulVedStart = 'Dashboard';
 
   final ScrollController _scrollController = ScrollController();
@@ -432,7 +431,7 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
       setState(() {
         _standardModulVedStart = gemtStartModul;
         if (gemtStartModul != 'Dashboard') {
-          _aktivtModulNavn = gemtStartModul;
+          _aktivtModulNoegle = gemtStartModul;
         }
       });
     }
@@ -471,8 +470,11 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
         } else if (decoded is Map) {
           setState(() {
             _moduler = decoded['moduler'] ?? [];
-            final titleVal = decoded['site_title'] ?? decoded['site_name'];
-            if (titleVal != null && titleVal.toString().trim().isNotEmpty) {
+            final titleVal = decoded['site_title'];
+            if (titleVal != null &&
+                titleVal.toString() != 'null' &&
+                titleVal.toString() != 'undefined' &&
+                titleVal.toString().trim().isNotEmpty) {
               _siteTitle = titleVal.toString();
             }
             _isLoading = false;
@@ -497,36 +499,45 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
     }
   }
 
-  void _vaelgModul(String? modulNavn) {
+  void _vaelgModul(String? modulNoegle) {
     setState(() {
-      _aktivtModulNavn = modulNavn;
+      _aktivtModulNoegle = modulNoegle;
     });
   }
 
   Widget _bygModulIndhold() {
-    if (_aktivtModulNavn == null) {
+    if (_aktivtModulNoegle == null) {
       return _bygRigtigtDashboardTab();
     }
 
-    final navnLower = _aktivtModulNavn!.toLowerCase();
+    final keyLower = _aktivtModulNoegle!.toLowerCase();
 
-    if (navnLower.contains('bruger')) {
+    if (keyLower.contains('bruger')) {
       return BrugerGodkendelseScreen(baseUrl: widget.baseUrl);
-    } else if (navnLower.contains('pris')) {
-      return ElPriserScreen(baseUrl: widget.baseUrl);
-    } else if (navnLower.contains('elbil') || navnLower.contains('bil')) {
-      return ElBilQuickScreen(baseUrl: widget.baseUrl);
+    } else if (keyLower.contains('moduler')) {
+      return ModulStyringScreen(baseUrl: widget.baseUrl, moduler: _moduler);
     } else {
-      return StandardModulScreen(modulNavn: _aktivtModulNavn!);
+      final match = _moduler.firstWhere(
+        (m) =>
+            (m['module_key']?.toString().toLowerCase() == keyLower) ||
+            (m['menu_title']?.toString().toLowerCase() == keyLower),
+        orElse: () => {
+          'module_key': _aktivtModulNoegle,
+          'menu_title': _aktivtModulNoegle,
+          'version': '0.00'
+        },
+      );
+      return StandardModulScreen(baseUrl: widget.baseUrl, modulInfo: match);
     }
   }
 
-  // ÅBNER INDSTILLINGSLOG (Tandhjuls-menuen)
   void _visIndstillingerDialog() {
-    final validModuler =
-        _moduler.map((m) => m['name']?.toString() ?? '').toList();
+    final valgbareModuler = _moduler
+        .map((m) =>
+            m['menu_title']?.toString() ?? m['module_key']?.toString() ?? '')
+        .toList();
     String midlertidigStartModul =
-        (validModuler.contains(_standardModulVedStart) ||
+        (valgbareModuler.contains(_standardModulVedStart) ||
                 _standardModulVedStart == 'Dashboard')
             ? _standardModulVedStart
             : 'Dashboard';
@@ -567,8 +578,7 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                         const DropdownMenuItem(
                             value: 'Dashboard',
                             child: Text('Dashboard (Startsiden)')),
-                        ..._moduler.map((m) {
-                          final mName = m['name']?.toString() ?? '';
+                        ...valgbareModuler.map((mName) {
                           return DropdownMenuItem(
                             value: mName,
                             child: Text(mName),
@@ -608,10 +618,15 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final synligeModuler = _moduler.where((modul) {
+      final key = (modul['module_key']?.toString() ?? '').toLowerCase();
+      bool erInterntSystem = key == 'system' || key == 'kerne-system';
+      return !erInterntSystem && modul['menu_title'] != null;
+    }).toList();
+
     return Scaffold(
       body: Column(
         children: [
-          // 1. ØVERSTE HVIDE BAR (Titel til venstre, Tandhjul, Bruger & Log ud til højre)
           Container(
             color: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
@@ -634,7 +649,6 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                             color: Colors.black87,
                             fontWeight: FontWeight.w500)),
                     const SizedBox(width: 8),
-                    // TANDHJUL-IKON TIL INDSTILLINGER
                     IconButton(
                       icon: const Icon(Icons.settings,
                           size: 20, color: Colors.black54),
@@ -654,8 +668,6 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
               ],
             ),
           ),
-
-          // 2. DEN MØRKE MENULINJE NEDEUNDER
           Container(
             color: const Color(0xFF1E1E2D),
             width: double.infinity,
@@ -671,7 +683,7 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                     ElevatedButton(
                       onPressed: () => _vaelgModul(null),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _aktivtModulNavn == null
+                        backgroundColor: _aktivtModulNoegle == null
                             ? Colors.blueAccent
                             : const Color(0xFF2C2C3E),
                         foregroundColor: Colors.white,
@@ -682,14 +694,16 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                       child: const Text('Dashboard'),
                     ),
                     const SizedBox(width: 8),
-                    ..._moduler.map((modul) {
-                      final navn = modul['name']?.toString() ?? 'Modul';
-                      final erValgt = _aktivtModulNavn == navn;
+                    ...synligeModuler.map((modul) {
+                      final menuTitel = modul['menu_title']?.toString() ??
+                          modul['module_key']?.toString() ??
+                          'Modul';
+                      final erValgt = _aktivtModulNoegle == menuTitel;
 
                       return Padding(
                         padding: const EdgeInsets.only(right: 8.0),
                         child: ElevatedButton(
-                          onPressed: () => _vaelgModul(navn),
+                          onPressed: () => _vaelgModul(menuTitel),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: erValgt
                                 ? Colors.blueAccent
@@ -699,17 +713,30 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8)),
                           ),
-                          child: Text(navn),
+                          child: Text(menuTitel),
                         ),
                       );
                     }),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: () => _vaelgModul('Moduler'),
+                      icon: const Icon(Icons.extension, size: 16),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _aktivtModulNoegle == 'Moduler'
+                            ? Colors.blueAccent
+                            : const Color(0xFF2C2C3E),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
+                      label: const Text('Moduler'),
+                    ),
                   ],
                 ),
               ),
             ),
           ),
-
-          // 3. INDHOLD
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(24.0),
@@ -727,7 +754,6 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
     );
   }
 
-  // RENT DASHBOARD (Uden indstillingsboks, da den nu ligger i tandhjulet)
   Widget _bygRigtigtDashboardTab() {
     return SingleChildScrollView(
       child: Column(
@@ -739,8 +765,7 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                   fontWeight: FontWeight.bold,
                   color: Colors.black87)),
           const SizedBox(height: 8),
-          const Text(
-              'Vælg et installeret modul i topmenuen ovenfor for at komme i gang.',
+          const Text('Vælg et modul i topmenuen ovenfor for at komme i gang.',
               style: TextStyle(color: Colors.black54)),
           const SizedBox(height: 24),
           Card(
@@ -759,11 +784,11 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                           color: Colors.black87)),
                   const SizedBox(height: 8),
                   Text(
-                      'Du har ${_moduler.length} aktive moduler installeret i systemet.',
+                      'Der er hentet ${_moduler.length} aktive moduler/opsætninger dynamisk fra databasen.',
                       style: const TextStyle(color: Colors.black54)),
                   const SizedBox(height: 16),
                   const Text(
-                      'Tip: Klik på tandhjulet øverst til højre for at ændre, hvilket modul der skal åbne automatisk ved start.',
+                      'Tip: Klik på tandhjulet øverst til højre for at indstille dit foretrukne start-modul.',
                       style: TextStyle(fontSize: 13, color: Colors.blueGrey)),
                 ],
               ),
@@ -775,203 +800,130 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
   }
 }
 
-// Modul-side: El-priser
-class ElPriserScreen extends StatefulWidget {
+class ModulStyringScreen extends StatelessWidget {
   final String baseUrl;
-  const ElPriserScreen({super.key, required this.baseUrl});
+  final List<dynamic> moduler;
 
-  @override
-  State<ElPriserScreen> createState() => _ElPriserScreenState();
-}
-
-class _ElPriserScreenState extends State<ElPriserScreen> {
-  bool _isLoadingData = true;
-  bool _hasData = false;
-  Map<String, dynamic> _data = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _hentElPrisData();
-  }
-
-  Future<void> _hentElPrisData() async {
-    setState(() {
-      _isLoadingData = true;
-    });
-
-    try {
-      final response = await http
-          .get(Uri.parse('${widget.baseUrl}/hent_elpriser.php'))
-          .timeout(const Duration(seconds: 4));
-
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        if (decoded is Map && decoded.isNotEmpty) {
-          setState(() {
-            _data = Map<String, dynamic>.from(decoded);
-            _hasData = true;
-            _isLoadingData = false;
-          });
-        } else {
-          setState(() {
-            _hasData = false;
-            _isLoadingData = false;
-          });
-        }
-      } else {
-        setState(() {
-          _hasData = false;
-          _isLoadingData = false;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _hasData = false;
-        _isLoadingData = false;
-      });
-    }
-  }
+  const ModulStyringScreen(
+      {super.key, required this.baseUrl, required this.moduler});
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoadingData) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (!_hasData) {
-      return Center(
-        child: Card(
-          elevation: 2,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: Padding(
-            padding: const EdgeInsets.all(32.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.engineering,
-                    size: 64, color: Colors.orangeAccent),
-                const SizedBox(height: 16),
-                const Text('Elpriser Modul opdateres',
-                    style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87)),
-                const SizedBox(height: 8),
-                const Text(
-                    'Modulet er ved at blive opdateret på serveren,\nså der er ikke noget data at vise endnu.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.black54)),
-                const SizedBox(height: 20),
-                ElevatedButton.icon(
-                  onPressed: _hentElPrisData,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Tjek igen'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
     return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                  child: _bygStatKort('SENESTE PRIS',
-                      _data['seneste_pris']?.toString() ?? '-', false)),
-              const SizedBox(width: 16),
-              Expanded(
-                  child: _bygStatKort('GNS. FOR 2026',
-                      _data['gns_aar']?.toString() ?? '-', false)),
-              const SizedBox(width: 16),
-              Expanded(
-                  child: _bygStatKort('GNS. PERIODE',
-                      _data['gns_periode']?.toString() ?? '-', true)),
-              const SizedBox(width: 16),
-              Expanded(
-                  child: _bygStatKort('SIDSTE 30 DAGE',
-                      _data['sidste_30_dage']?.toString() ?? '-', false)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _bygStatKort(String titel, String vaerdi, bool isHighlighted) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isHighlighted ? Colors.blueAccent : Colors.grey.shade300,
-          width: isHighlighted ? 2 : 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 6,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Text(titel,
-              style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey)),
-          const SizedBox(height: 8),
-          Text(vaerdi,
-              style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87)),
-        ],
-      ),
-    );
-  }
-}
-
-class ElBilQuickScreen extends StatelessWidget {
-  final String baseUrl;
-  const ElBilQuickScreen({super.key, required this.baseUrl});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
       child: Card(
         elevation: 2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
-          padding: const EdgeInsets.all(32.0),
+          padding: const EdgeInsets.all(24.0),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.electric_car,
-                  size: 64, color: Colors.blueAccent),
-              const SizedBox(height: 16),
-              const Text('Elbil Modul',
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87)),
+              const Row(
+                children: [
+                  Icon(Icons.extension, color: Colors.blueAccent, size: 28),
+                  SizedBox(width: 12),
+                  Text('Modul Styring',
+                      style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87)),
+                ],
+              ),
               const SizedBox(height: 8),
               const Text(
-                  'Her kan du registrere kørte kilometer og kW forbrug nemt og hurtigt.',
-                  textAlign: TextAlign.center,
+                  'Hentet direkte fra din `module_settings`-tabel i databasen.',
                   style: TextStyle(color: Colors.black54)),
+              const Divider(height: 32),
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: moduler.length,
+                itemBuilder: (context, index) {
+                  final m = moduler[index];
+                  final key = m['module_key']?.toString() ?? 'ukendt';
+                  final menuTitle = m['menu_title']?.toString() ?? key;
+                  final adminTitle = m['admin_menu_title']?.toString() ?? '-';
+                  final version = m['version']?.toString() ?? '0.00';
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 14, horizontal: 16),
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const ContainerDot(),
+                            const SizedBox(width: 16),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(menuTitle,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        color: Colors.black87)),
+                                const SizedBox(height: 4),
+                                Text('Nøgle: $key | Admin-titel: $adminTitle',
+                                    style: const TextStyle(
+                                        fontSize: 12, color: Colors.black54)),
+                              ],
+                            ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                  color:
+                                      Colors.blueAccent.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(6)),
+                              child: Text('v$version',
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blueAccent)),
+                            ),
+                            const SizedBox(width: 16),
+                            const Text('Aktiv',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.green,
+                                    fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class ContainerDot extends StatelessWidget {
+  const ContainerDot({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 10,
+      height: 10,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.green,
       ),
     );
   }
@@ -986,21 +938,21 @@ class BrugerGodkendelseScreen extends StatelessWidget {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
+      child: const Padding(
+        padding: EdgeInsets.all(32.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.admin_panel_settings,
+            Icon(Icons.admin_panel_settings,
                 size: 64, color: Colors.blueAccent),
-            const SizedBox(height: 16),
-            const Text('Brugerstyring & Godkendelse',
+            SizedBox(height: 16),
+            Text('Brugerstyring & Godkendelse',
                 style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                     color: Colors.black87)),
-            const SizedBox(height: 8),
-            const Text(
+            SizedBox(height: 8),
+            Text(
                 'Her kan administratorer godkende brugere og tildele rettigheder.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.black54)),
@@ -1011,33 +963,515 @@ class BrugerGodkendelseScreen extends StatelessWidget {
   }
 }
 
-class StandardModulScreen extends StatelessWidget {
-  final String modulNavn;
-  const StandardModulScreen({super.key, required this.modulNavn});
+class StandardModulScreen extends StatefulWidget {
+  final String baseUrl;
+  final Map<String, dynamic> modulInfo;
+
+  const StandardModulScreen(
+      {super.key, required this.baseUrl, required this.modulInfo});
+
+  @override
+  State<StandardModulScreen> createState() => _StandardModulScreenState();
+}
+
+class _StandardModulScreenState extends State<StandardModulScreen> {
+  bool _isLoading = true;
+  List<dynamic> _components = [];
+  String _errorMessage = '';
+  int _valgteDage = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _hentModulLayout(_valgteDage);
+  }
+
+  Future<void> _hentModulLayout(int dage) async {
+    setState(() {
+      _isLoading = true;
+      _valgteDage = dage;
+    });
+
+    final moduleKey = widget.modulInfo['module_key']?.toString() ?? '';
+
+    String cleanBaseUrl = widget.baseUrl;
+    if (cleanBaseUrl.endsWith('/api')) {
+      cleanBaseUrl = cleanBaseUrl.substring(0, cleanBaseUrl.length - 4);
+    }
+
+    try {
+      final url =
+          '$cleanBaseUrl/system/modules/$moduleKey/api/api.php?days=$dage';
+      final response =
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) {
+          setState(() {
+            _components = decoded['components'] ?? [];
+            _isLoading = false;
+          });
+        } else {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = 'Modul-API returnerede ikke et gyldigt format.';
+          });
+        }
+      } else {
+        setState(() {
+          _isLoading = false;
+          _errorMessage =
+              'Kunne ikke indhente data (Status: ${response.statusCode})';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Forbindelsesfejl: $e';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.widgets, size: 64, color: Colors.blueAccent),
-            const SizedBox(height: 16),
-            Text(modulNavn,
-                style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87)),
-            const SizedBox(height: 8),
-            const Text('Dette modul er installeret og klar til brug.',
-                style: TextStyle(color: Colors.black54)),
-          ],
-        ),
+    final title = widget.modulInfo['menu_title']?.toString() ??
+        widget.modulInfo['module_key']?.toString() ??
+        'Modul';
+    final version = widget.modulInfo['version']?.toString() ?? '0.00';
+    final moduleKey = widget.modulInfo['module_key']?.toString() ?? '';
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16.0, left: 4.0, right: 4.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.widgets,
+                        size: 22, color: Colors.blueAccent),
+                    const SizedBox(width: 8),
+                    Text(title,
+                        style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87)),
+                    const SizedBox(width: 12),
+                    Text('($moduleKey · v$version)',
+                        style: const TextStyle(
+                            color: Colors.black54, fontSize: 12)),
+                  ],
+                ),
+                SizedBox(
+                  height: 32,
+                  width: 32,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    onPressed: () => _hentModulLayout(_valgteDage),
+                    tooltip: 'Genindlæs data',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_isLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(40.0),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (_errorMessage.isNotEmpty)
+            Center(
+              child: Padding(
+                padding: EdgeInsets.all(20.0),
+                child: Text(_errorMessage,
+                    style: const TextStyle(color: Colors.redAccent)),
+              ),
+            )
+          else if (_components.isEmpty)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(24.0),
+                child: Center(
+                    child:
+                        Text('Ingen komponenter defineret af modulet endnu.')),
+              ),
+            )
+          else
+            ..._components.map((comp) => _bygDynamiskKomponent(comp)),
+        ],
       ),
     );
+  }
+
+  Widget _bygDynamiskKomponent(Map<String, dynamic> comp) {
+    final type = comp['type']?.toString() ?? '';
+
+    switch (type) {
+      case 'stats_cards':
+        final List cards = comp['cards'] ?? [];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16.0),
+          child: Row(
+            children: cards.map<Widget>((card) {
+              final t = card['title'] ?? '';
+              final v = card['value'] ?? '';
+              final h = card['highlight'] == true;
+              return Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: h ? Colors.blueAccent : Colors.grey.shade300,
+                          width: h ? 2 : 1),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(t,
+                            style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey)),
+                        const SizedBox(height: 8),
+                        Text(v,
+                            style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87)),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        );
+
+      case 'filter_buttons':
+        final List options = comp['options'] ?? [];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              ToggleButtons(
+                borderRadius: BorderRadius.circular(8),
+                selectedColor: Colors.white,
+                fillColor: Colors.blueAccent,
+                color: Colors.black87,
+                constraints: const BoxConstraints(minHeight: 36, minWidth: 60),
+                isSelected: options
+                    .map<bool>((opt) => opt['value'] == _valgteDage)
+                    .toList(),
+                onPressed: (index) {
+                  final val = options[index]['value'];
+                  if (val != null) {
+                    _hentModulLayout(val);
+                  }
+                },
+                children: options.map<Widget>((opt) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                    child: Text(opt['label']?.toString() ?? ''),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        );
+
+      case 'text_block':
+        final text = comp['text'] ?? '';
+        final isTitle = comp['is_title'] == true;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: isTitle ? 18 : 14,
+              fontWeight: isTitle ? FontWeight.bold : FontWeight.normal,
+              color: Colors.black87,
+            ),
+          ),
+        );
+
+      case 'chart_bar':
+        final heading = comp['title'] ?? '';
+        final List points = comp['points'] ?? [];
+
+        double maxVal = 4.0;
+        for (var p in points) {
+          double val = double.tryParse(p['value'].toString()) ?? 0.0;
+          if (val > maxVal) maxVal = val;
+        }
+
+        return Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 16),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (heading.isNotEmpty) ...[
+                  Text(heading,
+                      style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87)),
+                  const Divider(height: 20),
+                ],
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 220,
+                  child: points.isEmpty
+                      ? const Center(
+                          child: Text('Ingen datapunkter til grafen.'))
+                      : ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: points.length,
+                          itemBuilder: (context, index) {
+                            final pt = points[index];
+                            final label = pt['label']?.toString() ?? '';
+                            double val =
+                                double.tryParse(pt['value'].toString()) ?? 0.0;
+
+                            double barHeight = (val / maxVal) * 150;
+                            if (barHeight < 10) barHeight = 10;
+
+                            return Container(
+                              width: points.length > 14 ? 40 : 60,
+                              margin: const EdgeInsets.symmetric(horizontal: 4),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    '${val.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black54),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Container(
+                                    width: points.length > 14 ? 24 : 36,
+                                    height: barHeight,
+                                    decoration: BoxDecoration(
+                                      color: Colors
+                                          .blueAccent, // Standard stabil blå farve
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    label,
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.black87),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+      case 'chart_line':
+        final heading = comp['title'] ?? '';
+        final List points = comp['points'] ?? [];
+
+        return Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 16),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (heading.isNotEmpty) ...[
+                  Text(heading,
+                      style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87)),
+                  const Divider(height: 20),
+                ],
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 200,
+                  child: points.isEmpty
+                      ? const Center(child: Text('Ingen kurvedata fundet.'))
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: points.map<Widget>((pt) {
+                            final label = pt['label']?.toString() ?? '';
+                            final val = pt['value']?.toString() ?? '0';
+                            return Column(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                Text(val,
+                                    style: const TextStyle(
+                                        fontSize: 9, color: Colors.grey)),
+                                const SizedBox(height: 4),
+                                Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: const BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: Colors.teal)),
+                                const SizedBox(height: 8),
+                                Text(label,
+                                    style: const TextStyle(
+                                        fontSize: 10, color: Colors.black87)),
+                              ],
+                            );
+                          }).toList(),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+      case 'progress_bar':
+        final label = comp['label'] ?? '';
+        double progress = double.tryParse(comp['progress'].toString()) ?? 0.0;
+        if (progress > 1.0) progress = progress / 100.0;
+
+        return Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 16),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(label,
+                        style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87)),
+                    Text('${(progress * 100).toStringAsFixed(0)}%',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blueAccent)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 12,
+                    backgroundColor: Colors.grey.shade200,
+                    valueColor:
+                        const AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+      case 'data_list':
+        final heading = comp['title'] ?? '';
+        final List items = comp['items'] ?? [];
+        return Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 16),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (heading.isNotEmpty) ...[
+                  Text(heading,
+                      style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87)),
+                  const Divider(height: 20),
+                ],
+                if (items.isEmpty)
+                  const Text('Ingen data i listen.',
+                      style: TextStyle(color: Colors.black54))
+                else
+                  ...items.map<Widget>((item) {
+                    final label = item['label']?.toString() ?? '';
+                    final value = item['value']?.toString() ?? '';
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      margin: const EdgeInsets.symmetric(vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(label,
+                              style: const TextStyle(color: Colors.black87)),
+                          Text(value,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87)),
+                        ],
+                      ),
+                    );
+                  }),
+              ],
+            ),
+          ),
+        );
+
+      case 'image_banner':
+        final imageUrl = comp['url']?.toString() ?? '';
+        if (imageUrl.isEmpty) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          height: 180,
+          width: double.infinity,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            image: DecorationImage(
+                image: NetworkImage(imageUrl), fit: BoxFit.cover),
+          ),
+        );
+
+      default:
+        return Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Text('Ukendt komponent-type: $type',
+              style: const TextStyle(color: Colors.red)),
+        );
+    }
   }
 }
