@@ -527,7 +527,11 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
           'version': '0.00'
         },
       );
-      return StandardModulScreen(baseUrl: widget.baseUrl, modulInfo: match);
+      return StandardModulScreen(
+        key: ValueKey(match['module_key'] ?? _aktivtModulNoegle),
+        baseUrl: widget.baseUrl,
+        modulInfo: match,
+      );
     }
   }
 
@@ -1033,6 +1037,127 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
     }
   }
 
+  void _visOpskriftDetaljerFraItem(Map<String, dynamic> item) {
+    final details = item['details'];
+    if (details == null) return;
+
+    final title = details['title']?.toString() ?? item['label'] ?? 'Opskrift';
+    final category = details['category']?.toString() ?? '';
+    final time = details['time']?.toString() ?? '';
+    final servings = details['servings']?.toString() ?? '';
+    final imageUrl = details['image_url']?.toString() ?? '';
+    final ingredients = details['ingredients']?.toString() ?? '';
+    final instructions = details['instructions']?.toString() ?? '';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          contentPadding: EdgeInsets.zero,
+          content: SizedBox(
+            width: 550,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (imageUrl.isNotEmpty)
+                    ClipRRect(
+                      borderRadius:
+                          const BorderRadius.vertical(top: Radius.circular(16)),
+                      child: Image.network(
+                        imageUrl,
+                        height: 200,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (c, e, s) => Container(
+                          height: 100,
+                          color: Colors.grey.shade200,
+                          child: const Center(
+                              child: Text('Kunne ikke indlæse billede')),
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.all(28.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          category,
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blueAccent),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          title,
+                          style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            const Icon(Icons.access_time,
+                                size: 16, color: Colors.black54),
+                            const SizedBox(width: 4),
+                            Text(time,
+                                style: const TextStyle(color: Colors.black54)),
+                            const SizedBox(width: 16),
+                            const Icon(Icons.people,
+                                size: 16, color: Colors.black54),
+                            const SizedBox(width: 4),
+                            Text(servings,
+                                style: const TextStyle(color: Colors.black54)),
+                          ],
+                        ),
+                        const Divider(height: 28),
+                        const Text('Ingredienser',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87)),
+                        const SizedBox(height: 8),
+                        Text(ingredients,
+                            style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.black87,
+                                height: 1.5)),
+                        const SizedBox(height: 20),
+                        const Text('Fremgangsmåde',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87)),
+                        const SizedBox(height: 8),
+                        Text(instructions,
+                            style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.black87,
+                                height: 1.5)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Luk'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final title = widget.modulInfo['menu_title']?.toString() ??
@@ -1270,8 +1395,7 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
                                     width: points.length > 14 ? 24 : 36,
                                     height: barHeight,
                                     decoration: BoxDecoration(
-                                      color: Colors
-                                          .blueAccent, // Standard stabil blå farve
+                                      color: Colors.blueAccent,
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                   ),
@@ -1425,25 +1549,41 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
                   ...items.map<Widget>((item) {
                     final label = item['label']?.toString() ?? '';
                     final value = item['value']?.toString() ?? '';
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
-                      margin: const EdgeInsets.symmetric(vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(label,
-                              style: const TextStyle(color: Colors.black87)),
-                          Text(value,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black87)),
-                        ],
+                    return InkWell(
+                      onTap: item['details'] != null
+                          ? () => _visOpskriftDetaljerFraItem(item)
+                          : null,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        margin: const EdgeInsets.symmetric(vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Text(label,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.black87)),
+                                if (item['details'] != null) ...[
+                                  const SizedBox(width: 8),
+                                  const Icon(Icons.chevron_right,
+                                      size: 16, color: Colors.blueAccent),
+                                ],
+                              ],
+                            ),
+                            Text(value,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black54)),
+                          ],
+                        ),
                       ),
                     );
                   }),
