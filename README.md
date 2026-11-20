@@ -1,17 +1,24 @@
 # domusius_app
 
-A new Flutter project.
+Cross-platform Flutter client for **Domusius** – a modular home management and energy tracking platform connected to a PHP/MySQL backend (`system/modules/<module>/api/`).
+
+## Features
+
+- **Dynamic module rendering:** Loads views, stats cards, forms, and tables dynamically from each module's `api.php` endpoint.
+- **Electric Vehicle (EV) module:** Supports multiple vehicles (`elbiler`), logging charging sessions (`elbil_opladning`) with kWh, price (`DKK`), timestamp, source (`APP`), location (`Home` / `Out`), and odometer (`km_stand`), plus recent charging history across vehicles.
+- **Modular architecture:** New modules can be added on the backend without hardcoding module names or endpoints in the UI.
+
+## Network & Configuration
+
+- Designed to connect to your self-hosted backend (for example over **Tailscale** or local/remote HTTPS).
+- Keep local server URLs, credentials, and environment-specific settings out of version control.
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+1. Ensure your **Domusius** PHP/MySQL backend is running and reachable from your device/emulator.
+2. Configure your backend base URL in the app.
+3. Install dependencies and run the app:
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter pub get
+flutter run
