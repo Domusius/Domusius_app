@@ -575,7 +575,7 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                         style: TextStyle(fontSize: 12, color: Colors.black54)),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
-                      value: midlertidigStartModul,
+                      initialValue: midlertidigStartModul,
                       decoration:
                           const InputDecoration(border: OutlineInputBorder()),
                       items: [
@@ -982,18 +982,34 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
   bool _isLoading = true;
   List<dynamic> _components = [];
   String _errorMessage = '';
-  int _valgteDage = 1;
+
+  final Map<String, String> _queryParams = {
+    'days': '7',
+    'mode': 'days',
+  };
+
+  final ScrollController _barScrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    _hentModulLayout(_valgteDage);
+    _hentModulLayout();
   }
 
-  Future<void> _hentModulLayout(int dage) async {
+  @override
+  void dispose() {
+    _barScrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _hentModulLayout({Map<String, String>? updates}) async {
+    if (updates != null && updates.isNotEmpty) {
+      _queryParams.addAll(updates);
+    }
+
     setState(() {
       _isLoading = true;
-      _valgteDage = dage;
+      _errorMessage = '';
     });
 
     final moduleKey = widget.modulInfo['module_key']?.toString() ?? '';
@@ -1004,16 +1020,46 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
     }
 
     try {
-      final url =
-          '$cleanBaseUrl/system/modules/$moduleKey/api/api.php?days=$dage';
-      final response =
-          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
+      final uri =
+          Uri.parse('$cleanBaseUrl/system/modules/$moduleKey/api/api.php')
+              .replace(queryParameters: _queryParams);
+
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         if (decoded is Map) {
+          final rawComps = decoded['components'];
+          final comps = rawComps is List ? rawComps : <dynamic>[];
+
+          for (final c in comps) {
+            if (c is Map) {
+              final cType = c['type']?.toString() ?? '';
+              if (cType == 'mode_switcher' &&
+                  c['selected_mode'] != null &&
+                  updates == null) {
+                _queryParams['mode'] = c['selected_mode'].toString();
+              } else if (cType == 'filter_buttons' &&
+                  c['selected_days'] != null &&
+                  updates == null) {
+                _queryParams['days'] = c['selected_days'].toString();
+              } else if (cType == 'comparison_filter' &&
+                  c['selected_years'] is List &&
+                  (_queryParams['years'] == null ||
+                      _queryParams['years']!.isEmpty)) {
+                final sel = (c['selected_years'] as List)
+                    .map((y) => int.tryParse(y.toString()) ?? 0)
+                    .where((y) => y > 0)
+                    .toList();
+                if (sel.isNotEmpty) {
+                  _queryParams['years'] = sel.join(',');
+                }
+              }
+            }
+          }
+
           setState(() {
-            _components = decoded['components'] ?? [];
+            _components = comps;
             _isLoading = false;
           });
         } else {
@@ -1037,11 +1083,12 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
     }
   }
 
-  void _visOpskriftDetaljerFraItem(Map<String, dynamic> item) {
+  void _visOpskriftDetaljerFraItem(Map<dynamic, dynamic> item) {
     final details = item['details'];
-    if (details == null) return;
+    if (details is! Map) return;
 
-    final title = details['title']?.toString() ?? item['label'] ?? 'Opskrift';
+    final title =
+        details['title']?.toString() ?? item['label']?.toString() ?? 'Opskrift';
     final category = details['category']?.toString() ?? '';
     final time = details['time']?.toString() ?? '';
     final servings = details['servings']?.toString() ?? '';
@@ -1158,6 +1205,19 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
     );
   }
 
+  Color _parseHexColor(String? hex, {Color fallback = Colors.black87}) {
+    if (hex == null || hex.trim().isEmpty) return fallback;
+    final clean = hex.trim().replaceAll('#', '');
+    if (clean.length == 6) {
+      final parsed = int.tryParse('FF$clean', radix: 16);
+      if (parsed != null) return Color(parsed);
+    } else if (clean.length == 8) {
+      final parsed = int.tryParse(clean, radix: 16);
+      if (parsed != null) return Color(parsed);
+    }
+    return fallback;
+  }
+
   @override
   Widget build(BuildContext context) {
     final title = widget.modulInfo['menu_title']?.toString() ??
@@ -1197,7 +1257,7 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
                   child: IconButton(
                     padding: EdgeInsets.zero,
                     icon: const Icon(Icons.refresh, size: 18),
-                    onPressed: () => _hentModulLayout(_valgteDage),
+                    onPressed: () => _hentModulLayout(),
                     tooltip: 'Genindlæs data',
                   ),
                 ),
@@ -1229,24 +1289,47 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
               ),
             )
           else
-            ..._components.map((comp) => _bygDynamiskKomponent(comp)),
+            ..._components
+                .whereType()
+                .map((comp) => _bygDynamiskKomponent(comp)),
         ],
       ),
     );
   }
 
-  Widget _bygDynamiskKomponent(Map<String, dynamic> comp) {
+  Widget _bygDynamiskKomponent(Map<dynamic, dynamic> comp) {
     final type = comp['type']?.toString() ?? '';
 
     switch (type) {
+      case 'mode_switcher':
+        final options = comp['options'] is List ? comp['options'] as List : [];
+        final currentMode =
+            _queryParams['mode'] ?? comp['selected_mode']?.toString() ?? 'days';
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12.0),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: options.whereType().map<Widget>((opt) {
+              final label = opt['label']?.toString() ?? '';
+              final val = opt['value']?.toString() ?? 'days';
+              return ChoiceChip(
+                label: Text(label),
+                selected: currentMode == val,
+                onSelected: (_) => _hentModulLayout(updates: {'mode': val}),
+              );
+            }).toList(),
+          ),
+        );
+
       case 'stats_cards':
-        final List cards = comp['cards'] ?? [];
+        final cards = comp['cards'] is List ? comp['cards'] as List : [];
         return Padding(
           padding: const EdgeInsets.only(bottom: 16.0),
           child: Row(
-            children: cards.map<Widget>((card) {
-              final t = card['title'] ?? '';
-              final v = card['value'] ?? '';
+            children: cards.whereType().map<Widget>((card) {
+              final t = card['title']?.toString() ?? '';
+              final v = card['value']?.toString() ?? '';
               final h = card['highlight'] == true;
               return Expanded(
                 child: Padding(
@@ -1284,7 +1367,11 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
         );
 
       case 'filter_buttons':
-        final List options = comp['options'] ?? [];
+        final options = comp['options'] is List ? comp['options'] as List : [];
+        if (options.isEmpty) return const SizedBox.shrink();
+        final currentDays = int.tryParse(_queryParams['days'] ?? '') ??
+            int.tryParse(comp['selected_days']?.toString() ?? '') ??
+            7;
         return Padding(
           padding: const EdgeInsets.only(bottom: 16.0),
           child: Row(
@@ -1296,16 +1383,22 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
                 fillColor: Colors.blueAccent,
                 color: Colors.black87,
                 constraints: const BoxConstraints(minHeight: 36, minWidth: 60),
-                isSelected: options
-                    .map<bool>((opt) => opt['value'] == _valgteDage)
-                    .toList(),
+                isSelected: options.whereType().map<bool>((opt) {
+                  final optVal = int.tryParse(opt['value'].toString());
+                  return optVal == currentDays;
+                }).toList(),
                 onPressed: (index) {
-                  final val = options[index]['value'];
-                  if (val != null) {
-                    _hentModulLayout(val);
+                  final optList = options.whereType().toList();
+                  if (index < optList.length) {
+                    final val =
+                        int.tryParse(optList[index]['value'].toString());
+                    if (val != null) {
+                      _hentModulLayout(
+                          updates: {'days': val.toString(), 'mode': 'days'});
+                    }
                   }
                 },
-                children: options.map<Widget>((opt) {
+                children: options.whereType().map<Widget>((opt) {
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12.0),
                     child: Text(opt['label']?.toString() ?? ''),
@@ -1316,8 +1409,246 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
           ),
         );
 
+      case 'comparison_filter':
+        final availableRaw = comp['available_years'] is List
+            ? comp['available_years'] as List
+            : [];
+        final List<int> availableYears = availableRaw
+            .map((y) => int.tryParse(y.toString()) ?? 0)
+            .where((y) => y > 0)
+            .toList();
+
+        List<int> activeYears = [];
+        if (_queryParams['years'] != null &&
+            _queryParams['years']!.trim().isNotEmpty) {
+          activeYears = _queryParams['years']!
+              .split(',')
+              .map((y) => int.tryParse(y.trim()) ?? 0)
+              .where((y) => y > 0)
+              .toList();
+        }
+        if (activeYears.isEmpty && comp['selected_years'] is List) {
+          activeYears = (comp['selected_years'] as List)
+              .map((y) => int.tryParse(y.toString()) ?? 0)
+              .where((y) => y > 0)
+              .toList();
+        }
+        if (activeYears.isEmpty) {
+          activeYears = List<int>.from(availableYears);
+        }
+
+        return Card(
+          elevation: 1,
+          margin: const EdgeInsets.only(bottom: 16),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(14.0),
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                const Text('Vælg år:',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                ...availableYears.map((y) {
+                  final checked = activeYears.contains(y);
+                  return FilterChip(
+                    label: Text('$y'),
+                    selected: checked,
+                    onSelected: (sel) {
+                      final next = List<int>.from(activeYears);
+                      if (sel) {
+                        if (!next.contains(y)) next.add(y);
+                      } else if (next.length > 1) {
+                        next.remove(y);
+                      }
+                      next.sort((a, b) => b.compareTo(a));
+                      _hentModulLayout(updates: {
+                        'mode': 'comparison',
+                        'years': next.join(','),
+                      });
+                    },
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+
+      case 'input_form':
+        return DynamicInputFormCard(
+          comp: comp,
+          baseUrl: widget.baseUrl,
+          moduleKey: widget.modulInfo['module_key']?.toString() ?? '',
+          onSaved: () => _hentModulLayout(),
+        );
+
+      case 'chart_comparison':
+        final heading = comp['title']?.toString() ?? 'Årssammenligning';
+        final labels = comp['labels'] is List
+            ? comp['labels'] as List
+            : [
+                'Jan',
+                'Feb',
+                'Mar',
+                'Apr',
+                'Maj',
+                'Jun',
+                'Jul',
+                'Aug',
+                'Sep',
+                'Okt',
+                'Nov',
+                'Dec'
+              ];
+        final series = comp['series'] is List ? comp['series'] as List : [];
+        final List<Color> palette = [
+          Colors.blueAccent,
+          Colors.green,
+          Colors.orange,
+          Colors.redAccent,
+          Colors.purple,
+          Colors.teal,
+        ];
+
+        return Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 16),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(heading,
+                    style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87)),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 14,
+                  runSpacing: 6,
+                  children: List.generate(series.length, (i) {
+                    final s = series[i];
+                    final sLabel =
+                        s is Map ? (s['label']?.toString() ?? 'År') : 'År';
+                    final color = palette[i % palette.length];
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(width: 16, height: 4, color: color),
+                        const SizedBox(width: 6),
+                        Text(sLabel,
+                            style: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w600)),
+                      ],
+                    );
+                  }),
+                ),
+                const Divider(height: 20),
+                SizedBox(
+                  height: 260,
+                  width: double.infinity,
+                  child: CustomPaint(
+                    painter: _ComparisonLineChartPainter(
+                      labels: labels.map((e) => e.toString()).toList(),
+                      series: series,
+                      palette: palette,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+      case 'chart_comparison_bar':
+        final heading = comp['title']?.toString() ?? 'Årssammenligning';
+        final labels = comp['labels'] is List
+            ? comp['labels'] as List
+            : [
+                'Jan',
+                'Feb',
+                'Mar',
+                'Apr',
+                'Maj',
+                'Jun',
+                'Jul',
+                'Aug',
+                'Sep',
+                'Okt',
+                'Nov',
+                'Dec'
+              ];
+        final series = comp['series'] is List ? comp['series'] as List : [];
+        final List<Color> palette = [
+          Colors.blueAccent,
+          Colors.green,
+          Colors.orange,
+          Colors.redAccent,
+          Colors.purple,
+          Colors.teal,
+        ];
+
+        return Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 16),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(heading,
+                    style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87)),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 14,
+                  runSpacing: 6,
+                  children: List.generate(series.length, (i) {
+                    final s = series[i];
+                    final sLabel =
+                        s is Map ? (s['label']?.toString() ?? 'År') : 'År';
+                    final color = palette[i % palette.length];
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(width: 14, height: 14, color: color),
+                        const SizedBox(width: 6),
+                        Text(sLabel,
+                            style: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w600)),
+                      ],
+                    );
+                  }),
+                ),
+                const Divider(height: 20),
+                SizedBox(
+                  height: 260,
+                  width: double.infinity,
+                  child: CustomPaint(
+                    painter: _ComparisonBarChartPainter(
+                      labels: labels.map((e) => e.toString()).toList(),
+                      series: series,
+                      palette: palette,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
       case 'text_block':
-        final text = comp['text'] ?? '';
+        final text = comp['text']?.toString() ?? '';
         final isTitle = comp['is_title'] == true;
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -1332,13 +1663,15 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
         );
 
       case 'chart_bar':
-        final heading = comp['title'] ?? '';
-        final List points = comp['points'] ?? [];
+        final heading = comp['title']?.toString() ?? '';
+        final points = comp['points'] is List ? comp['points'] as List : [];
 
-        double maxVal = 4.0;
+        double maxVal = 1.0;
         for (var p in points) {
-          double val = double.tryParse(p['value'].toString()) ?? 0.0;
-          if (val > maxVal) maxVal = val;
+          if (p is Map) {
+            double val = double.tryParse(p['value']?.toString() ?? '') ?? 0.0;
+            if (val > maxVal) maxVal = val;
+          }
         }
 
         return Card(
@@ -1361,54 +1694,65 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
                 ],
                 const SizedBox(height: 10),
                 SizedBox(
-                  height: 220,
+                  height: 235,
                   child: points.isEmpty
                       ? const Center(
                           child: Text('Ingen datapunkter til grafen.'))
-                      : ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: points.length,
-                          itemBuilder: (context, index) {
-                            final pt = points[index];
-                            final label = pt['label']?.toString() ?? '';
-                            double val =
-                                double.tryParse(pt['value'].toString()) ?? 0.0;
+                      : Scrollbar(
+                          controller: _barScrollController,
+                          thumbVisibility: true,
+                          child: ListView.builder(
+                            controller: _barScrollController,
+                            scrollDirection: Axis.horizontal,
+                            itemCount: points.length,
+                            itemBuilder: (context, index) {
+                              final pt = points[index];
+                              final label = pt is Map
+                                  ? (pt['label']?.toString() ?? '')
+                                  : '';
+                              double val = pt is Map
+                                  ? (double.tryParse(
+                                          pt['value']?.toString() ?? '') ??
+                                      0.0)
+                                  : 0.0;
 
-                            double barHeight = (val / maxVal) * 150;
-                            if (barHeight < 10) barHeight = 10;
+                              double barHeight = (val / maxVal) * 150;
+                              if (barHeight < 10) barHeight = 10;
 
-                            return Container(
-                              width: points.length > 14 ? 40 : 60,
-                              margin: const EdgeInsets.symmetric(horizontal: 4),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  Text(
-                                    '${val.toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.black54),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Container(
-                                    width: points.length > 14 ? 24 : 36,
-                                    height: barHeight,
-                                    decoration: BoxDecoration(
-                                      color: Colors.blueAccent,
-                                      borderRadius: BorderRadius.circular(6),
+                              return Container(
+                                width: points.length > 14 ? 42 : 60,
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 4),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      val.toStringAsFixed(2),
+                                      style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black54),
                                     ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    label,
-                                    style: const TextStyle(
-                                        fontSize: 11, color: Colors.black87),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
+                                    const SizedBox(height: 4),
+                                    Container(
+                                      width: points.length > 14 ? 26 : 36,
+                                      height: barHeight,
+                                      decoration: BoxDecoration(
+                                        color: Colors.blueAccent,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      label,
+                                      style: const TextStyle(
+                                          fontSize: 11, color: Colors.black87),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
                         ),
                 ),
               ],
@@ -1417,8 +1761,18 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
         );
 
       case 'chart_line':
-        final heading = comp['title'] ?? '';
-        final List points = comp['points'] ?? [];
+        final heading = comp['title']?.toString() ?? '';
+        final points = comp['points'] is List ? comp['points'] as List : [];
+
+        double maxVal = 1.0;
+        for (var p in points) {
+          if (p is Map) {
+            final v = double.tryParse(p['value']?.toString() ?? '') ?? 0.0;
+            if (v > maxVal) maxVal = v;
+          }
+        }
+        maxVal = ((maxVal * 1.05) / 10000).ceilToDouble() * 10000;
+        if (maxVal < 10000) maxVal = 10000;
 
         return Card(
           elevation: 2,
@@ -1438,37 +1792,18 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
                           color: Colors.black87)),
                   const Divider(height: 20),
                 ],
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 SizedBox(
-                  height: 200,
+                  height: 270,
+                  width: double.infinity,
                   child: points.isEmpty
                       ? const Center(child: Text('Ingen kurvedata fundet.'))
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: points.map<Widget>((pt) {
-                            final label = pt['label']?.toString() ?? '';
-                            final val = pt['value']?.toString() ?? '0';
-                            return Column(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                Text(val,
-                                    style: const TextStyle(
-                                        fontSize: 9, color: Colors.grey)),
-                                const SizedBox(height: 4),
-                                Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: const BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Colors.teal)),
-                                const SizedBox(height: 8),
-                                Text(label,
-                                    style: const TextStyle(
-                                        fontSize: 10, color: Colors.black87)),
-                              ],
-                            );
-                          }).toList(),
+                      : CustomPaint(
+                          painter: _SimpleLinePointsPainter(
+                            points: points,
+                            minVal: 0.0,
+                            maxVal: maxVal,
+                          ),
                         ),
                 ),
               ],
@@ -1476,10 +1811,115 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
           ),
         );
 
+      case 'data_table':
+        final heading = comp['title']?.toString() ?? '';
+        final headers = comp['headers'] is List
+            ? (comp['headers'] as List).map((h) => h.toString()).toList()
+            : <String>[];
+        final rows = comp['rows'] is List ? comp['rows'] as List : [];
+
+        return Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 16),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (heading.isNotEmpty) ...[
+                  Text(heading,
+                      style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87)),
+                  const Divider(height: 20),
+                ],
+                if (headers.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 12, horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Row(
+                      children: headers.map((h) {
+                        return Expanded(
+                          child: Text(
+                            h,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                if (rows.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Text('Ingen tabeldata fundet.',
+                        style: TextStyle(color: Colors.black54)),
+                  )
+                else
+                  ...rows.whereType<List>().map<Widget>((rowCells) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 12, horizontal: 12),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: Colors.grey.shade100),
+                        ),
+                      ),
+                      child: Row(
+                        children: List.generate(headers.length, (colIdx) {
+                          final cell = colIdx < rowCells.length
+                              ? rowCells[colIdx]
+                              : null;
+                          String text = '';
+                          bool bold = false;
+                          Color color = Colors.black87;
+
+                          if (cell is Map) {
+                            text = cell['text']?.toString() ?? '';
+                            bold = cell['bold'] == true;
+                            color = _parseHexColor(cell['color']?.toString());
+                          } else if (cell != null) {
+                            text = cell.toString();
+                          }
+
+                          return Expanded(
+                            child: Text(
+                              text,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight:
+                                    bold ? FontWeight.bold : FontWeight.w500,
+                                color: color,
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    );
+                  }),
+              ],
+            ),
+          ),
+        );
+
       case 'progress_bar':
-        final label = comp['label'] ?? '';
-        double progress = double.tryParse(comp['progress'].toString()) ?? 0.0;
+        final label = comp['label']?.toString() ?? '';
+        double progress =
+            double.tryParse(comp['progress']?.toString() ?? '') ?? 0.0;
         if (progress > 1.0) progress = progress / 100.0;
+        progress = progress.clamp(0.0, 1.0);
 
         return Card(
           elevation: 2,
@@ -1522,8 +1962,8 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
         );
 
       case 'data_list':
-        final heading = comp['title'] ?? '';
-        final List items = comp['items'] ?? [];
+        final heading = comp['title']?.toString() ?? '';
+        final items = comp['items'] is List ? comp['items'] as List : [];
         return Card(
           elevation: 2,
           margin: const EdgeInsets.only(bottom: 16),
@@ -1546,11 +1986,12 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
                   const Text('Ingen data i listen.',
                       style: TextStyle(color: Colors.black54))
                 else
-                  ...items.map<Widget>((item) {
+                  ...items.whereType().map<Widget>((item) {
                     final label = item['label']?.toString() ?? '';
                     final value = item['value']?.toString() ?? '';
+                    final hasDetails = item['details'] is Map;
                     return InkWell(
-                      onTap: item['details'] != null
+                      onTap: hasDetails
                           ? () => _visOpskriftDetaljerFraItem(item)
                           : null,
                       child: Container(
@@ -1571,7 +2012,7 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
                                     style: const TextStyle(
                                         fontWeight: FontWeight.w500,
                                         color: Colors.black87)),
-                                if (item['details'] != null) ...[
+                                if (hasDetails) ...[
                                   const SizedBox(width: 8),
                                   const Icon(Icons.chevron_right,
                                       size: 16, color: Colors.blueAccent),
@@ -1613,5 +2054,731 @@ class _StandardModulScreenState extends State<StandardModulScreen> {
               style: const TextStyle(color: Colors.red)),
         );
     }
+  }
+}
+
+class DynamicInputFormCard extends StatefulWidget {
+  final Map<dynamic, dynamic> comp;
+  final String baseUrl;
+  final String moduleKey;
+  final VoidCallback onSaved;
+
+  const DynamicInputFormCard({
+    super.key,
+    required this.comp,
+    required this.baseUrl,
+    required this.moduleKey,
+    required this.onSaved,
+  });
+
+  @override
+  State<DynamicInputFormCard> createState() => _DynamicInputFormCardState();
+}
+
+class _DynamicInputFormCardState extends State<DynamicInputFormCard> {
+  final Map<String, TextEditingController> _formControllers = {};
+  final Map<String, String> _formSelectValues = {};
+  bool _isFormSubmitting = false;
+  String _formFeedback = '';
+  bool _formIsError = false;
+
+  List<dynamic> _collectActiveFields() {
+    final rawFields = widget.comp['fields'];
+    if (rawFields is! List) return <dynamic>[];
+
+    final List<dynamic> activeEntries = [];
+    for (final item in rawFields) {
+      if (item is! Map) continue;
+      final fieldName = item['name']?.toString() ?? '';
+      if (fieldName.isEmpty) continue;
+      if (item['enabled'] == false) continue;
+      activeEntries.add(item);
+      if (activeEntries.length >= 10) break;
+    }
+    return activeEntries;
+  }
+
+  List<dynamic> _extractOptions(Map<dynamic, dynamic> fieldDef) {
+    final rawOpts = fieldDef['options'];
+    if (rawOpts is List) return rawOpts;
+    return const <dynamic>[];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final fields = _collectActiveFields();
+    for (final f in fields) {
+      final name = f['name']?.toString() ?? '';
+      if (name.isEmpty) continue;
+      final inputType = f['input_type']?.toString() ?? 'text';
+      final defVal = f['default']?.toString() ?? '';
+
+      if (inputType == 'select') {
+        final opts = _extractOptions(f);
+        if (defVal.isNotEmpty) {
+          _formSelectValues[name] = defVal;
+        } else if (opts.isNotEmpty && opts.first is Map) {
+          _formSelectValues[name] =
+              (opts.first as Map)['value']?.toString() ?? '';
+        }
+      } else {
+        _formControllers[name] = TextEditingController(text: defVal);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final ctrl in _formControllers.values) {
+      ctrl.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _handleFormSubmit() async {
+    final endpoint = widget.comp['endpoint']?.toString() ?? '';
+    if (endpoint.isEmpty) return;
+
+    setState(() {
+      _isFormSubmitting = true;
+      _formFeedback = '';
+      _formIsError = false;
+    });
+
+    final activeFields = _collectActiveFields();
+    final Map<String, dynamic> submittedValues = {};
+    final List<String> submittedFieldNames = [];
+    final List<dynamic> metaEntries = [];
+
+    for (int idx = 0; idx < activeFields.length; idx++) {
+      final f = activeFields[idx];
+      final name = f['name']?.toString() ?? '';
+      if (name.isEmpty) continue;
+
+      final label = f['label']?.toString() ?? name;
+      final inputType = f['input_type']?.toString() ?? 'text';
+      final slot = int.tryParse(f['slot']?.toString() ?? '') ?? (idx + 1);
+
+      final String val = inputType == 'select'
+          ? (_formSelectValues[name] ?? '')
+          : (_formControllers[name]?.text.trim() ?? '');
+
+      submittedValues[name] = val;
+      submittedFieldNames.add(name);
+      metaEntries.add({
+        'slot': slot,
+        'name': name,
+        'label': label,
+        'input_type': inputType,
+        'value': val,
+      });
+    }
+
+    final Map<String, dynamic> requestPayload = {
+      'module_key': widget.moduleKey,
+      'active_field_count': activeFields.length,
+      'active_fields': submittedFieldNames,
+      'fields_meta': metaEntries,
+      'values': submittedValues,
+    };
+
+    final hidden = widget.comp['hidden_fields'];
+    if (hidden is Map) {
+      hidden.forEach((k, v) {
+        requestPayload[k.toString()] = v;
+      });
+    }
+
+    String cleanBase = widget.baseUrl;
+    if (cleanBase.endsWith('/api')) {
+      cleanBase = cleanBase.substring(0, cleanBase.length - 4);
+    }
+    final cleanPath =
+        endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$cleanBase/$cleanPath'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(requestPayload),
+          )
+          .timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map && decoded['status'] == 'success') {
+          for (final f in activeFields) {
+            final name = f['name']?.toString() ?? '';
+            final inputType = f['input_type']?.toString() ?? 'text';
+            if (inputType == 'number' || inputType == 'integer') {
+              _formControllers[name]?.clear();
+            }
+          }
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                    decoded['message']?.toString() ?? 'Data gemt i database.'),
+              ),
+            );
+          }
+          widget.onSaved();
+        } else {
+          setState(() {
+            _isFormSubmitting = false;
+            _formIsError = true;
+            _formFeedback = decoded is Map && decoded['message'] != null
+                ? decoded['message'].toString()
+                : 'Kunne ikke gemme data.';
+          });
+        }
+      } else {
+        setState(() {
+          _isFormSubmitting = false;
+          _formIsError = true;
+          _formFeedback = 'Serverfejl (${response.statusCode})';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isFormSubmitting = false;
+        _formIsError = true;
+        _formFeedback = 'Fejl ved gemning: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.comp['title']?.toString() ?? 'Indtast data';
+    final submitLabel = widget.comp['submit_label']?.toString() ?? 'Gem';
+    final fields = _collectActiveFields();
+
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87),
+                ),
+                Text(
+                  '${fields.length} aktive felter',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+              ],
+            ),
+            const Divider(height: 20),
+            Wrap(
+              spacing: 16,
+              runSpacing: 14,
+              children: fields.map<Widget>((f) {
+                final name = f['name']?.toString() ?? '';
+                final label = f['label']?.toString() ?? name;
+                final inputType = f['input_type']?.toString() ?? 'text';
+                final placeholder = f['placeholder']?.toString() ?? '';
+
+                if (inputType == 'select') {
+                  final opts = _extractOptions(f);
+                  final currentVal = _formSelectValues[name];
+                  return SizedBox(
+                    width: 220,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: currentVal,
+                      decoration: InputDecoration(
+                        labelText: label,
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                      ),
+                      items: opts.whereType().map((opt) {
+                        final oVal = opt['value']?.toString() ?? '';
+                        final oLab = opt['label']?.toString() ?? oVal;
+                        return DropdownMenuItem<String>(
+                          value: oVal,
+                          child: Text(oLab),
+                        );
+                      }).toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setState(() {
+                            _formSelectValues[name] = val;
+                          });
+                        }
+                      },
+                    ),
+                  );
+                }
+
+                final controller = _formControllers[name];
+                TextInputType keyboardType = TextInputType.text;
+                if (inputType == 'number') {
+                  keyboardType =
+                      const TextInputType.numberWithOptions(decimal: true);
+                } else if (inputType == 'integer') {
+                  keyboardType = TextInputType.number;
+                }
+
+                return SizedBox(
+                  width: 220,
+                  child: TextField(
+                    controller: controller,
+                    keyboardType: keyboardType,
+                    decoration: InputDecoration(
+                      labelText: label,
+                      hintText: placeholder.isNotEmpty ? placeholder : null,
+                      border: const OutlineInputBorder(),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            if (_formFeedback.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                _formFeedback,
+                style: TextStyle(
+                  color:
+                      _formIsError ? Colors.redAccent : Colors.green.shade700,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 42,
+              child: ElevatedButton.icon(
+                onPressed: _isFormSubmitting ? null : _handleFormSubmit,
+                icon: _isFormSubmitting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save, size: 18),
+                label: Text(submitLabel),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ComparisonLineChartPainter extends CustomPainter {
+  final List<String> labels;
+  final List<dynamic> series;
+  final List<Color> palette;
+
+  _ComparisonLineChartPainter({
+    required this.labels,
+    required this.series,
+    required this.palette,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const double leftPad = 42;
+    const double rightPad = 16;
+    const double topPad = 14;
+    const double bottomPad = 28;
+
+    final double plotW = size.width - leftPad - rightPad;
+    final double plotH = size.height - topPad - bottomPad;
+    if (plotW <= 10 || plotH <= 10 || labels.isEmpty) return;
+
+    double minVal = double.infinity;
+    double maxVal = double.negativeInfinity;
+
+    for (final s in series) {
+      final vals = s is Map && s['values'] is List ? s['values'] as List : [];
+      for (final v in vals) {
+        if (v == null) continue;
+        final numVal = double.tryParse(v.toString());
+        if (numVal != null) {
+          if (numVal < minVal) minVal = numVal;
+          if (numVal > maxVal) maxVal = numVal;
+        }
+      }
+    }
+
+    if (minVal == double.infinity || maxVal == double.negativeInfinity) {
+      minVal = 0;
+      maxVal = 3;
+    } else {
+      minVal = (minVal * 0.85).floorToDouble();
+      if (minVal < 0) minVal = 0;
+      maxVal = (maxVal * 1.15).ceilToDouble();
+      if (maxVal <= minVal) maxVal = minVal + 1;
+    }
+
+    final gridPaint = Paint()
+      ..color = Colors.grey.shade200
+      ..strokeWidth = 1;
+
+    final textPainter = TextPainter(textDirection: TextDirection.ltr);
+
+    const int steps = 4;
+    for (int i = 0; i <= steps; i++) {
+      final frac = i / steps;
+      final y = topPad + plotH * (1 - frac);
+      canvas.drawLine(
+          Offset(leftPad, y), Offset(leftPad + plotW, y), gridPaint);
+
+      final val = minVal + (maxVal - minVal) * frac;
+      textPainter.text = TextSpan(
+        text: val.toStringAsFixed(1).replaceAll('.', ','),
+        style: const TextStyle(fontSize: 10, color: Colors.black54),
+      );
+      textPainter.layout();
+      textPainter.paint(
+        canvas,
+        Offset(leftPad - textPainter.width - 6, y - textPainter.height / 2),
+      );
+    }
+
+    final int count = labels.length;
+    final double stepX = count > 1 ? plotW / (count - 1) : plotW;
+
+    for (int i = 0; i < count; i++) {
+      final x = leftPad + i * stepX;
+      textPainter.text = TextSpan(
+        text: labels[i],
+        style: const TextStyle(fontSize: 10, color: Colors.black87),
+      );
+      textPainter.layout();
+      textPainter.paint(
+        canvas,
+        Offset(x - textPainter.width / 2, topPad + plotH + 6),
+      );
+    }
+
+    for (int sIdx = 0; sIdx < series.length; sIdx++) {
+      final s = series[sIdx];
+      final vals = s is Map && s['values'] is List ? s['values'] as List : [];
+      final color = palette[sIdx % palette.length];
+
+      final linePaint = Paint()
+        ..color = color
+        ..strokeWidth = 2.5
+        ..style = PaintingStyle.stroke;
+
+      final dotPaint = Paint()
+        ..color = color
+        ..style = PaintingStyle.fill;
+
+      Path? path;
+      final List<Offset> points = [];
+
+      for (int i = 0; i < count; i++) {
+        if (i >= vals.length || vals[i] == null) {
+          if (path != null) {
+            canvas.drawPath(path, linePaint);
+            path = null;
+          }
+          continue;
+        }
+        final numVal = double.tryParse(vals[i].toString());
+        if (numVal == null) continue;
+
+        final normY = (numVal - minVal) / (maxVal - minVal);
+        final x = leftPad + i * stepX;
+        final y = topPad + plotH * (1 - normY.clamp(0.0, 1.0));
+        final pt = Offset(x, y);
+        points.add(pt);
+
+        if (path == null) {
+          path = Path()..moveTo(pt.dx, pt.dy);
+        } else {
+          path.lineTo(pt.dx, pt.dy);
+        }
+      }
+
+      if (path != null) {
+        canvas.drawPath(path, linePaint);
+      }
+      for (final pt in points) {
+        canvas.drawCircle(pt, 3.5, dotPaint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ComparisonLineChartPainter oldDelegate) {
+    return oldDelegate.series != series || oldDelegate.labels != labels;
+  }
+}
+
+class _ComparisonBarChartPainter extends CustomPainter {
+  final List<String> labels;
+  final List<dynamic> series;
+  final List<Color> palette;
+
+  _ComparisonBarChartPainter({
+    required this.labels,
+    required this.series,
+    required this.palette,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const double leftPad = 48;
+    const double rightPad = 16;
+    const double topPad = 14;
+    const double bottomPad = 28;
+
+    final double plotW = size.width - leftPad - rightPad;
+    final double plotH = size.height - topPad - bottomPad;
+    if (plotW <= 10 || plotH <= 10 || labels.isEmpty) return;
+
+    double maxVal = 1.0;
+    for (final s in series) {
+      final vals = s is Map && s['values'] is List ? s['values'] as List : [];
+      for (final v in vals) {
+        if (v == null) continue;
+        final numVal = double.tryParse(v.toString());
+        if (numVal != null && numVal > maxVal) {
+          maxVal = numVal;
+        }
+      }
+    }
+    maxVal = (maxVal * 1.1).ceilToDouble();
+
+    final gridPaint = Paint()
+      ..color = Colors.grey.shade200
+      ..strokeWidth = 1;
+
+    final textPainter = TextPainter(textDirection: TextDirection.ltr);
+
+    const int steps = 4;
+    for (int i = 0; i <= steps; i++) {
+      final frac = i / steps;
+      final y = topPad + plotH * (1 - frac);
+      canvas.drawLine(
+          Offset(leftPad, y), Offset(leftPad + plotW, y), gridPaint);
+
+      final val = maxVal * frac;
+      textPainter.text = TextSpan(
+        text: val.toStringAsFixed(0),
+        style: const TextStyle(fontSize: 10, color: Colors.black54),
+      );
+      textPainter.layout();
+      textPainter.paint(
+        canvas,
+        Offset(leftPad - textPainter.width - 6, y - textPainter.height / 2),
+      );
+    }
+
+    final int monthCount = labels.length;
+    final int seriesCount = series.isEmpty ? 1 : series.length;
+    final double groupSlotW = plotW / monthCount;
+    final double groupW = groupSlotW * 0.72;
+    final double barW = (groupW / seriesCount).clamp(3.0, 22.0);
+    final double totalBarsW = barW * seriesCount;
+
+    for (int m = 0; m < monthCount; m++) {
+      final groupCenterX = leftPad + (m + 0.5) * groupSlotW;
+      final startX = groupCenterX - (totalBarsW / 2);
+
+      for (int sIdx = 0; sIdx < series.length; sIdx++) {
+        final s = series[sIdx];
+        final vals = s is Map && s['values'] is List ? s['values'] as List : [];
+        if (m >= vals.length || vals[m] == null) continue;
+        final numVal = double.tryParse(vals[m].toString());
+        if (numVal == null || numVal <= 0) continue;
+
+        final barH = ((numVal / maxVal) * plotH).clamp(2.0, plotH);
+        final x = startX + sIdx * barW;
+        final y = topPad + plotH - barH;
+
+        final rect = RRect.fromRectAndCorners(
+          Rect.fromLTWH(x, y, barW - 1.5, barH),
+          topLeft: const Radius.circular(3),
+          topRight: const Radius.circular(3),
+        );
+        canvas.drawRRect(
+          rect,
+          Paint()..color = palette[sIdx % palette.length],
+        );
+      }
+
+      textPainter.text = TextSpan(
+        text: labels[m],
+        style: const TextStyle(fontSize: 10, color: Colors.black87),
+      );
+      textPainter.layout();
+      textPainter.paint(
+        canvas,
+        Offset(groupCenterX - textPainter.width / 2, topPad + plotH + 6),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ComparisonBarChartPainter oldDelegate) {
+    return oldDelegate.series != series || oldDelegate.labels != labels;
+  }
+}
+
+class _SimpleLinePointsPainter extends CustomPainter {
+  final List<dynamic> points;
+  final double minVal;
+  final double maxVal;
+
+  _SimpleLinePointsPainter({
+    required this.points,
+    required this.minVal,
+    required this.maxVal,
+  });
+
+  String _formatThousands(double val) {
+    final intVal = val.round();
+    final str = intVal.abs().toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < str.length; i++) {
+      if (i > 0 && (str.length - i) % 3 == 0) {
+        buf.write('.');
+      }
+      buf.write(str[i]);
+    }
+    return intVal < 0 ? '-${buf.toString()}' : buf.toString();
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const double leftPad = 56;
+    const double rightPad = 16;
+    const double topPad = 14;
+    const double bottomPad = 34;
+
+    final double plotW = size.width - leftPad - rightPad;
+    final double plotH = size.height - topPad - bottomPad;
+    if (plotW <= 10 || plotH <= 10 || points.isEmpty) return;
+
+    final gridPaint = Paint()
+      ..color = Colors.grey.shade200
+      ..strokeWidth = 1;
+
+    final textPainter = TextPainter(textDirection: TextDirection.ltr);
+    const int ySteps = 5;
+    final span = (maxVal - minVal) <= 0 ? 1.0 : (maxVal - minVal);
+
+    for (int i = 0; i <= ySteps; i++) {
+      final frac = i / ySteps;
+      final y = topPad + plotH * (1 - frac);
+      canvas.drawLine(
+          Offset(leftPad, y), Offset(leftPad + plotW, y), gridPaint);
+
+      final yVal = minVal + span * frac;
+      textPainter.text = TextSpan(
+        text: _formatThousands(yVal),
+        style: const TextStyle(fontSize: 10, color: Colors.black54),
+      );
+      textPainter.layout();
+      textPainter.paint(
+        canvas,
+        Offset(leftPad - textPainter.width - 8, y - textPainter.height / 2),
+      );
+    }
+
+    final int count = points.length;
+    final double stepX = count > 1 ? plotW / (count - 1) : plotW / 2;
+
+    final linePaint = Paint()
+      ..color = Colors.blueAccent
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke;
+
+    final fillPaint = Paint()
+      ..color = Colors.blueAccent.withValues(alpha: 0.12)
+      ..style = PaintingStyle.fill;
+
+    final dotPaint = Paint()
+      ..color = Colors.blueAccent
+      ..style = PaintingStyle.fill;
+
+    final Path linePath = Path();
+    final Path fillPath = Path();
+    final List<Offset> coords = [];
+
+    for (int i = 0; i < count; i++) {
+      final pt = points[i];
+      final label = pt is Map ? (pt['label']?.toString() ?? '') : '';
+      final val = pt is Map
+          ? (double.tryParse(pt['value']?.toString() ?? '') ?? 0.0)
+          : 0.0;
+
+      final norm = ((val - minVal) / span).clamp(0.0, 1.0);
+      final x = count > 1 ? leftPad + i * stepX : leftPad + plotW / 2;
+      final y = topPad + plotH * (1 - norm);
+      final offset = Offset(x, y);
+      coords.add(offset);
+
+      if (i == 0) {
+        linePath.moveTo(x, y);
+        fillPath.moveTo(x, topPad + plotH);
+        fillPath.lineTo(x, y);
+      } else {
+        linePath.lineTo(x, y);
+        fillPath.lineTo(x, y);
+      }
+
+      if (i == count - 1) {
+        fillPath.lineTo(x, topPad + plotH);
+        fillPath.close();
+      }
+
+      final showLabel = i == count - 1 ||
+          (i < count - 2 && (count <= 14 || i == 0 || i % 3 == 0));
+      if (showLabel) {
+        textPainter.text = TextSpan(
+          text: label,
+          style: const TextStyle(fontSize: 9.5, color: Colors.black87),
+        );
+        textPainter.layout();
+        textPainter.paint(
+          canvas,
+          Offset(x - textPainter.width / 2, topPad + plotH + 8),
+        );
+      }
+    }
+
+    if (coords.length > 1) {
+      canvas.drawPath(fillPath, fillPaint);
+    }
+    canvas.drawPath(linePath, linePaint);
+    for (final c in coords) {
+      canvas.drawCircle(c, 3.0, dotPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SimpleLinePointsPainter oldDelegate) {
+    return oldDelegate.points != points ||
+        oldDelegate.minVal != minVal ||
+        oldDelegate.maxVal != maxVal;
   }
 }
