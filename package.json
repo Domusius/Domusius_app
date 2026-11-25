@@ -1,0 +1,24 @@
+{
+  "name": "domusius_app",
+  "version": "1.0.0",
+  "description": "Cross-platform Flutter client for **Domusius** – a modular home management and energy tracking platform connected to a PHP/MySQL backend (`system/modules/<module>/api/`).",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Domusius/Domusius_app.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Domusius/Domusius_app/issues"
+  },
+  "homepage": "https://github.com/Domusius/Domusius_app#readme"
+}
